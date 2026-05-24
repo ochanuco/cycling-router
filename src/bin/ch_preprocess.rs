@@ -68,9 +68,12 @@ fn load_nodes_ndjson(path: &Path) -> std::io::Result<(Vec<u64>, Vec<(f64, f64)>,
         }
         // Manual parse: nodes look like {"id":123,"lon":135.5,"lat":34.7}
         // Use a tiny extractor to avoid a serde dep for now.
-        let id = extract_field(&line, "\"id\"").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-        let lon = extract_field(&line, "\"lon\"").and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
-        let lat = extract_field(&line, "\"lat\"").and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+        // 必須フィールドは fail-fast。0 fallback だと壊れた入力をそのまま
+        // 前処理して ch_levels.ndjson / ch_edges.ndjson に不正データを書き
+        // 出すリスクがあるため、parse 失敗は line 内容付きで panic させる。
+        let id = parse_required::<u64>(&line, "\"id\"");
+        let lon = parse_required::<f64>(&line, "\"lon\"");
+        let lat = parse_required::<f64>(&line, "\"lat\"");
         if id_to_idx.contains_key(&id) {
             continue;
         }
@@ -80,6 +83,24 @@ fn load_nodes_ndjson(path: &Path) -> std::io::Result<(Vec<u64>, Vec<(f64, f64)>,
         coords.push((lon, lat));
     }
     Ok((ids, coords, id_to_idx))
+}
+
+/// Required-field parser: extract + parse, panicking with the offending line
+/// content on failure. Used for id/lon/lat/from/to/cost_m where a 0 fallback
+/// would silently produce corrupt CH output.
+fn parse_required<T: std::str::FromStr>(line: &str, key: &str) -> T
+where
+    <T as std::str::FromStr>::Err: std::fmt::Display,
+{
+    let raw = extract_field(line, key).unwrap_or_else(|| {
+        panic!("ch-preprocess: missing required field {} in line: {}", key, line);
+    });
+    raw.parse::<T>().unwrap_or_else(|e| {
+        panic!(
+            "ch-preprocess: failed to parse {} (value={:?}) in line: {} — {}",
+            key, raw, line, e
+        );
+    })
 }
 
 /// Extracts the substring following `key":` (a number) up to `,` or `}`.
@@ -107,9 +128,9 @@ fn load_edges_ndjson(
         if line.is_empty() {
             continue;
         }
-        let from = extract_field(&line, "\"from\"").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-        let to = extract_field(&line, "\"to\"").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-        let cost = extract_field(&line, "\"cost_m\"").and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.0);
+        let from = parse_required::<u64>(&line, "\"from\"");
+        let to = parse_required::<u64>(&line, "\"to\"");
+        let cost = parse_required::<f32>(&line, "\"cost_m\"");
         // oneway: "oneway":true / false / null. We look for the literal.
         let oneway = line.contains("\"oneway\":true");
         let from_idx = match id_to_idx.get(&from) {
