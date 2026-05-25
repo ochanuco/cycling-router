@@ -1,7 +1,8 @@
 target/
 pkg-node/
+pkg-web/
 Cargo.lock
 
-# pkg/ は worker.mjs が import するので git に含める (Workers Builds は
-# Rust toolchain を持っていないため、wasm-pack 出力を artifact として
-# 配布する)。再生成は `npm run wasm:build`。
+# pkg/ は worker.mjs (Workers) が import するので git に含める。
+# pkg-web/ は frontend/wasm/ へ cp 済なので git 不要。
+# 再生成は `npm run wasm:build`。

@@ -3,6 +3,7 @@
 export const memory: WebAssembly.Memory;
 export const astar: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
 export const route_ch: (a: any, b: number, c: number, d: number, e: number, f: number) => any;
+export const route_distances: (a: number, b: number, c: number, d: number) => [number, number];
 export const __wbindgen_externrefs: WebAssembly.Table;
 export const __wbindgen_malloc: (a: number, b: number) => number;
 export const __wbindgen_free: (a: number, b: number, c: number) => void;

@@ -41,6 +41,33 @@ export function route_ch(buffers, from_lon, from_lat, to_lon, to_lat, max_snap_m
     const ret = wasm.route_ch(buffers, from_lon, from_lat, to_lon, to_lat, max_snap_meters);
     return ret;
 }
+
+/**
+ * Browser GPX-mode helper: for each shop point, compute the minimum
+ * perpendicular distance (meters) to the route polyline. Used by
+ * `frontend/app.js` to filter supply-points within N meters of the route
+ * without running the O(N×M) JS loop on the main thread (5-10x faster).
+ *
+ * Inputs (flat typed arrays for zero-copy boundary):
+ * - `route_lonlats`: Float64Array of length 2*N (lon, lat alternating)
+ * - `shop_lonlats`: Float64Array of length 2*M (lon, lat alternating)
+ *
+ * Returns Float32Array of length M with per-shop minimum distance (m).
+ * On empty/invalid inputs returns the appropriate length 0 / INF array.
+ * @param {Float64Array} route_lonlats
+ * @param {Float64Array} shop_lonlats
+ * @returns {Float32Array}
+ */
+export function route_distances(route_lonlats, shop_lonlats) {
+    const ptr0 = passArrayF64ToWasm0(route_lonlats, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArrayF64ToWasm0(shop_lonlats, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.route_distances(ptr0, len0, ptr1, len1);
+    var v3 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v3;
+}
 export function __wbg___wbindgen_throw_1506f2235d1bdba0(arg0, arg1) {
     throw new Error(getStringFromWasm0(arg0, arg1));
 }
@@ -106,6 +133,11 @@ export function __wbindgen_init_externref_table() {
     table.set(offset + 2, true);
     table.set(offset + 3, false);
 }
+function getArrayF32FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getFloat32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
+}
+
 function getArrayF64FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getFloat64ArrayMemory0().subarray(ptr / 8, ptr / 8 + len);
@@ -114,6 +146,14 @@ function getArrayF64FromWasm0(ptr, len) {
 function getArrayU8FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
+}
+
+let cachedFloat32ArrayMemory0 = null;
+function getFloat32ArrayMemory0() {
+    if (cachedFloat32ArrayMemory0 === null || cachedFloat32ArrayMemory0.byteLength === 0) {
+        cachedFloat32ArrayMemory0 = new Float32Array(wasm.memory.buffer);
+    }
+    return cachedFloat32ArrayMemory0;
 }
 
 let cachedFloat64ArrayMemory0 = null;

@@ -12,6 +12,7 @@
 mod csr;
 mod chquery;
 mod snap;
+mod route_filter;
 
 use std::collections::BinaryHeap;
 use std::cmp::Ordering;
@@ -139,6 +140,22 @@ pub fn astar(
     out.push(dist[goal as usize]);
     out.extend(path_rev);
     out
+}
+
+/// Browser GPX-mode helper: for each shop point, compute the minimum
+/// perpendicular distance (meters) to the route polyline. Used by
+/// `frontend/app.js` to filter supply-points within N meters of the route
+/// without running the O(N×M) JS loop on the main thread (5-10x faster).
+///
+/// Inputs (flat typed arrays for zero-copy boundary):
+/// - `route_lonlats`: Float64Array of length 2*N (lon, lat alternating)
+/// - `shop_lonlats`: Float64Array of length 2*M (lon, lat alternating)
+///
+/// Returns Float32Array of length M with per-shop minimum distance (m).
+/// On empty/invalid inputs returns the appropriate length 0 / INF array.
+#[wasm_bindgen]
+pub fn route_distances(route_lonlats: &[f64], shop_lonlats: &[f64]) -> Vec<f32> {
+    route_filter::route_distances(route_lonlats, shop_lonlats)
 }
 
 /// DNF route entry point. Decodes tile buffers, builds CSR, snaps endpoints,
