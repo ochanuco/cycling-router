@@ -1,3 +1,4 @@
+/* AUTO-PATCHED-BY: scripts/patch_wasm_dts.mjs */
 /* tslint:disable */
 /* eslint-disable */
 
@@ -9,7 +10,7 @@
  *
  * このファイルは wasm-pack が再生成すると元の `any` シグネチャに戻るため、
  * `npm run wasm:build` の post-build (scripts/patch_wasm_dts.mjs) で
- * 自動的に再 patch される。
+ * 自動的に再 patch される。冪等性は先頭の PATCH_MARKER コメントで判定。
  */
 
 import type { RouteChResult } from './rust_router_worker';
