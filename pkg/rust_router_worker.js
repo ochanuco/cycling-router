@@ -52,3 +52,11 @@ export function astar(...args) {
   ensureInitialized();
   return bg.astar(...args);
 }
+
+// 点 → ルート最短距離の batch 計算。GPX モードの shop filter を server
+// side でやって download 量を 10x 削減する用途に Worker からも呼ぶ。
+// 同じ Rust 実装が browser (frontend/wasm) でも動く。
+export function route_distances(...args) {
+  ensureInitialized();
+  return bg.route_distances(...args);
+}
