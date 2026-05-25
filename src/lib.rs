@@ -160,12 +160,25 @@ pub fn route_ch(
     to_lat: f64,
     max_snap_meters: f64,
 ) -> JsValue {
+    // Input validation (CodeRabbit PR #87 指摘):
+    //  - max_snap_meters = NaN / 負値 → 全 snap 判定が false 化して上限無効化
+    //  - from/to 座標 NaN → snap 内部で全 NaN 比較 → 全 INF → snap miss
+    if !max_snap_meters.is_finite() || max_snap_meters <= 0.0 {
+        return to_err("invalid_max_snap_meters");
+    }
+    if !from_lon.is_finite() || !from_lat.is_finite() || !to_lon.is_finite() || !to_lat.is_finite() {
+        return to_err("invalid_coords");
+    }
+
     // Copy each Uint8Array into Vec<u8> for owned access during CSR build.
+    // 不正な要素 (Uint8Array 以外) を silent skip すると欠落グラフで誤った
+    // 結果を返してしまうため、明示的に error 返却する (CodeRabbit PR #87)。
     let mut buf_vec: Vec<Vec<u8>> = Vec::with_capacity(buffers.length() as usize);
     for i in 0..buffers.length() {
         let v = buffers.get(i);
-        if let Ok(u8a) = v.dyn_into::<js_sys::Uint8Array>() {
-            buf_vec.push(u8a.to_vec());
+        match v.dyn_into::<js_sys::Uint8Array>() {
+            Ok(u8a) => buf_vec.push(u8a.to_vec()),
+            Err(_) => return to_err("invalid_buffer_element"),
         }
     }
 

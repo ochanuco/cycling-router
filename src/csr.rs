@@ -41,6 +41,17 @@ fn read_header(buf: &[u8]) -> Option<TileHeader> {
     }
     let node_count = u32::from_le_bytes(buf[8..12].try_into().ok()?);
     let edge_count = u32::from_le_bytes(buf[12..16].try_into().ok()?);
+    // 宣言サイズと実バッファ長が一致するか検証。短いバッファのまま固定長
+    // スライス読みすると panic するため、不一致なら None でスキップ
+    // (CodeRabbit PR #87 指摘)。
+    let nb = if version == 2 { NODE_BYTES_V2 } else { NODE_BYTES_V1 };
+    let eb = if version == 2 { EDGE_BYTES_V2 } else { EDGE_BYTES_V1 };
+    let expected = HEADER_BYTES
+        .checked_add((node_count as usize).checked_mul(nb)?)?
+        .checked_add((edge_count as usize).checked_mul(eb)?)?;
+    if buf.len() < expected {
+        return None;
+    }
     Some(TileHeader { version, node_count, edge_count })
 }
 
