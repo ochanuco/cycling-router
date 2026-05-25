@@ -1,3 +1,7 @@
 target/
-pkg/
+pkg-node/
 Cargo.lock
+
+# pkg/ は worker.mjs が import するので git に含める (Workers Builds は
+# Rust toolchain を持っていないため、wasm-pack 出力を artifact として
+# 配布する)。再生成は `npm run wasm:build`。

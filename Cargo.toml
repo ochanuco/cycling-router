@@ -19,6 +19,10 @@ path = "src/bin/ch_preprocess.rs"
 [dependencies]
 wasm-bindgen = "0.2"
 js-sys = "0.3"
+# serde-wasm-bindgen を入れて、Rust 構造体 → JsValue (JS object) 変換を
+# wasm_bindgen::to_value(&v) で行う。RouteResult を直接 JS に返すのに使う。
+serde = { version = "1", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
 
 [profile.release]
 opt-level = 3

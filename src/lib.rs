@@ -1,21 +1,22 @@
-//! Cycling A* router compiled to wasm32.
+//! Cycling router compiled to wasm32.
 //!
-//! Mirrors `aStarOnView` in `lib/cycling/tiled_router.js`: forward A* with
-//! Euclidean-meter heuristic scaled by MIN_COST_FACTOR (0.7). Inputs are
-//! flat typed arrays so the JS↔WASM boundary stays zero-copy friendly.
+//! ## Entry points
 //!
-//! Inputs:
-//! - `node_coords`: Float64Array of length 2*N. [lon0, lat0, lon1, lat1, ...]
-//!   Node ID is the implicit index 0..N-1.
-//! - `edge_data`: Float64Array of length 3*E. [from, to, cost, from, to, cost, ...]
-//! - `start`, `goal`: node indices (u32)
-//!
-//! Output: `Float64Array` containing `[distance, ...path_indices]`.
-//! On unreachable: `[+Infinity]`.
+//! - [`route_ch`] — DNF cold-path: takes raw tile binaries from R2 +
+//!   from/to lon/lat, runs tile decode → CSR build → snap → CH query →
+//!   shortcut unpack, returns route geometry as JS object. This is the
+//!   production path.
+//! - [`astar`] (legacy) — original forward A* PoC on flat typed arrays.
+//!   Kept for backward compat; not used in production.
+
+mod csr;
+mod chquery;
+mod snap;
 
 use std::collections::BinaryHeap;
 use std::cmp::Ordering;
 use wasm_bindgen::prelude::*;
+use serde::Serialize;
 
 const MIN_COST_FACTOR: f64 = 0.7;
 
@@ -138,6 +139,190 @@ pub fn astar(
     out.push(dist[goal as usize]);
     out.extend(path_rev);
     out
+}
+
+/// DNF route entry point. Decodes tile buffers, builds CSR, snaps endpoints,
+/// runs CH bidirectional query, unpacks shortcuts. Returns a JS object with
+/// `{ distance, settled, terminated, ch_ms, snap_from_m, snap_to_m,
+/// from_id, to_id, coords: [[lon,lat]...], algorithm, csr_bytes,
+/// csr_node_count, csr_edge_count }`.
+///
+/// `buffers` は `Array<Uint8Array>` を JS から渡す想定。各要素はタイル
+/// binary (v1 or v2)。corridor + snap neighborhood 分まとめて渡す。
+///
+/// 失敗時は `{ error: "..." }` を含む JS object を返す (例外を投げない)。
+#[wasm_bindgen]
+pub fn route_ch(
+    buffers: js_sys::Array,
+    from_lon: f64,
+    from_lat: f64,
+    to_lon: f64,
+    to_lat: f64,
+    max_snap_meters: f64,
+) -> JsValue {
+    // Copy each Uint8Array into Vec<u8> for owned access during CSR build.
+    let mut buf_vec: Vec<Vec<u8>> = Vec::with_capacity(buffers.length() as usize);
+    for i in 0..buffers.length() {
+        let v = buffers.get(i);
+        if let Ok(u8a) = v.dyn_into::<js_sys::Uint8Array>() {
+            buf_vec.push(u8a.to_vec());
+        }
+    }
+
+    let t_csr0 = chquery_now_ms();
+    let csr = csr::build_csr(&buf_vec);
+    let csr_build_ms = (chquery_now_ms() - t_csr0) as u32;
+    let csr_bytes = csr.memory_bytes() as u32;
+
+    let from_snap = snap::snap(&csr, from_lon, from_lat);
+    let to_snap = snap::snap(&csr, to_lon, to_lat);
+    let (from_snap, to_snap) = match (from_snap, to_snap) {
+        (Some(a), Some(b)) => (a, b),
+        _ => return to_err("no_nearby_node"),
+    };
+    if from_snap.distance_m > max_snap_meters {
+        return to_err("no_nearby_node_from");
+    }
+    if to_snap.distance_m > max_snap_meters {
+        return to_err("no_nearby_node_to");
+    }
+
+    // CH 主経路 (level 制約あり)
+    let t_ch0 = chquery_now_ms();
+    let mut rc = chquery::ch_query(&csr, from_snap.idx, to_snap.idx, &chquery::ChQueryOpts::default());
+    let mut ch_ms = (chquery_now_ms() - t_ch0) as u32;
+    let mut fallback_ms: Option<u32> = None;
+    let mut algorithm = "ch-wasm";
+    // cap 触れたら plain bidi Dijkstra fallback (level 制約なし)
+    if !rc.distance.is_finite() {
+        let t_fb0 = chquery_now_ms();
+        rc = chquery::ch_query(
+            &csr,
+            from_snap.idx,
+            to_snap.idx,
+            &chquery::ChQueryOpts {
+                settled_cap: 300_000,
+                pops_cap: 800_000,
+                time_budget_ms: 10_000,
+                no_level_constraint: true,
+            },
+        );
+        fallback_ms = Some((chquery_now_ms() - t_fb0) as u32);
+        algorithm = "csr-wasm-dijkstra";
+    }
+
+    if !rc.distance.is_finite() {
+        return to_err_with("unreachable_in_corridor", &RouteMeta {
+            csr_bytes,
+            csr_node_count: csr.node_count,
+            csr_edge_count: csr.edge_count,
+            csr_build_ms,
+            ch_ms,
+            fallback_ms,
+        });
+    }
+
+    // shortcut 展開
+    let mut expanded: Vec<u32> = Vec::with_capacity(rc.path_idx.len() * 4);
+    if !rc.path_idx.is_empty() {
+        expanded.push(rc.path_idx[0]);
+        for w in rc.path_idx.windows(2) {
+            chquery::unpack_ch_edge(&csr, w[0], w[1], &mut expanded);
+        }
+    }
+    let mut coords: Vec<(f32, f32)> = Vec::with_capacity(expanded.len());
+    for &idx in &expanded {
+        let i = idx as usize;
+        let lon = csr.lons[i];
+        let lat = csr.lats[i];
+        if lon.is_nan() || lat.is_nan() {
+            continue;
+        }
+        coords.push((lon, lat));
+    }
+    // OSM ids of from/to for caller logging (i64 → f64 で JS Number 範囲内、< 2^53)
+    let result = RouteOk {
+        distance: rc.distance,
+        settled: rc.settled,
+        terminated: rc.terminated.to_string(),
+        ch_ms,
+        fallback_ms,
+        snap_from_m: from_snap.distance_m,
+        snap_to_m: to_snap.distance_m,
+        from_id: from_snap.id as f64,
+        to_id: to_snap.id as f64,
+        coords,
+        algorithm: algorithm.to_string(),
+        csr_bytes,
+        csr_node_count: csr.node_count,
+        csr_edge_count: csr.edge_count,
+        csr_build_ms,
+        node_count: expanded.len() as u32,
+    };
+    serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+}
+
+#[derive(Serialize)]
+struct RouteOk {
+    distance: f64,
+    settled: u32,
+    terminated: String,
+    ch_ms: u32,
+    fallback_ms: Option<u32>,
+    snap_from_m: f64,
+    snap_to_m: f64,
+    from_id: f64,
+    to_id: f64,
+    coords: Vec<(f32, f32)>,
+    algorithm: String,
+    csr_bytes: u32,
+    csr_node_count: u32,
+    csr_edge_count: u32,
+    csr_build_ms: u32,
+    node_count: u32,
+}
+
+#[derive(Serialize)]
+struct RouteMeta {
+    csr_bytes: u32,
+    csr_node_count: u32,
+    csr_edge_count: u32,
+    csr_build_ms: u32,
+    ch_ms: u32,
+    fallback_ms: Option<u32>,
+}
+
+#[derive(Serialize)]
+struct RouteErr<'a> {
+    error: &'a str,
+}
+
+#[derive(Serialize)]
+struct RouteErrWithMeta<'a> {
+    error: &'a str,
+    meta: &'a RouteMeta,
+}
+
+fn to_err(msg: &str) -> JsValue {
+    serde_wasm_bindgen::to_value(&RouteErr { error: msg }).unwrap_or(JsValue::NULL)
+}
+
+fn to_err_with(msg: &str, meta: &RouteMeta) -> JsValue {
+    serde_wasm_bindgen::to_value(&RouteErrWithMeta { error: msg, meta }).unwrap_or(JsValue::NULL)
+}
+
+// timing helper proxying to chquery module's now_ms
+#[cfg(target_arch = "wasm32")]
+fn chquery_now_ms() -> u64 {
+    js_sys::Date::now() as u64
+}
+#[cfg(not(target_arch = "wasm32"))]
+fn chquery_now_ms() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
