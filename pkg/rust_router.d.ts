@@ -8,8 +8,8 @@
  * RouteChErr union 型が定義されている。
  *
  * このファイルは wasm-pack が再生成すると元の `any` シグネチャに戻るため、
- * `npm run wasm:build` 直後はこのコメントを再適用する必要がある (将来は
- * post-build script で patch する候補)。
+ * `npm run wasm:build` の post-build (scripts/patch_wasm_dts.mjs) で
+ * 自動的に再 patch される。
  */
 
 import type { RouteChResult } from './rust_router_worker';
