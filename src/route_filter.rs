@@ -29,12 +29,7 @@ fn segment_distance2(px: f64, py: f64, ax: f64, ay: f64, bx: f64, by: f64) -> f6
     } else {
         let apx = px - ax;
         let apy = py - ay;
-        let mut t = (apx * abx + apy * aby) / ab2;
-        if t < 0.0 {
-            t = 0.0;
-        } else if t > 1.0 {
-            t = 1.0;
-        }
+        let t = ((apx * abx + apy * aby) / ab2).clamp(0.0, 1.0);
         let cx = ax + abx * t;
         let cy = ay + aby * t;
         let dx = px - cx;

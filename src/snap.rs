@@ -33,6 +33,8 @@ pub fn snap(csr: &Csr, lon: f64, lat: f64) -> Option<SnapResult> {
     let mut best_idx = u32::MAX;
     let mut best_sq: f64 = f64::INFINITY;
     let n = csr.node_count as usize;
+    // get_unchecked の安全性根拠: 座標配列は node_count 以上の長さを持つ（CSR build 時に保証）。
+    debug_assert!(n <= csr.lons.len() && n <= csr.lats.len() && n <= csr.ids.len());
     let mut i = 0usize;
     while i < n {
         let ln = unsafe { *csr.lons.get_unchecked(i) } as f64;
