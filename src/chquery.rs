@@ -6,7 +6,7 @@
 //! - core-core lateral relax 許可 (`noLevelConstraint` で全部緩める fallback も)
 //! - settled / pops / time の caps で hard bail-out → caller が fallback
 
-use crate::csr::{Csr, NO_VIA, UNKNOWN_LEVEL};
+use crate::csr::{level_word_is_core, level_word_is_unknown, level_word_level, Csr, NO_VIA};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
@@ -95,8 +95,14 @@ pub fn ch_query(csr: &Csr, start_idx: u32, goal_idx: u32, opts: &ChQueryOpts) ->
 
     let mut heap_f: BinaryHeap<HeapEntry> = BinaryHeap::with_capacity(1024);
     let mut heap_b: BinaryHeap<HeapEntry> = BinaryHeap::with_capacity(1024);
-    heap_f.push(HeapEntry { key: 0.0, idx: start_idx });
-    heap_b.push(HeapEntry { key: 0.0, idx: goal_idx });
+    heap_f.push(HeapEntry {
+        key: 0.0,
+        idx: start_idx,
+    });
+    heap_b.push(HeapEntry {
+        key: 0.0,
+        idx: goal_idx,
+    });
 
     let mut best: f64 = INF;
     let mut meeting: i32 = -1;
@@ -107,7 +113,6 @@ pub fn ch_query(csr: &Csr, start_idx: u32, goal_idx: u32, opts: &ChQueryOpts) ->
 
     // We pre-borrow CSR fields to avoid repeated indirections.
     let levels = &csr.levels;
-    let cores = &csr.cores;
     let fwd_off = &csr.fwd_offsets;
     let fwd_to = &csr.fwd_to;
     let fwd_cost = &csr.fwd_cost;
@@ -165,19 +170,21 @@ pub fn ch_query(csr: &Csr, start_idx: u32, goal_idx: u32, opts: &ChQueryOpts) ->
                     meeting = u as i32;
                 }
             }
-            let u_level = levels[u_usize];
-            let u_is_core = cores[u_usize] == 1;
+            let u_word = levels[u_usize];
+            let u_level = level_word_level(u_word);
+            let u_is_core = level_word_is_core(u_word);
             let so = fwd_off[u_usize] as usize;
             let eo = fwd_off[u_usize + 1] as usize;
             for e in so..eo {
                 let v = fwd_to[e];
                 let v_usize = v as usize;
-                let v_level = levels[v_usize];
-                if v_level == UNKNOWN_LEVEL {
+                let v_word = levels[v_usize];
+                if level_word_is_unknown(v_word) {
                     continue;
                 }
                 if !no_level {
-                    let core_core = u_is_core && cores[v_usize] == 1;
+                    let v_level = level_word_level(v_word);
+                    let core_core = u_is_core && level_word_is_core(v_word);
                     if !core_core && v_level <= u_level {
                         continue;
                     }
@@ -220,19 +227,21 @@ pub fn ch_query(csr: &Csr, start_idx: u32, goal_idx: u32, opts: &ChQueryOpts) ->
                     meeting = u as i32;
                 }
             }
-            let u_level = levels[u_usize];
-            let u_is_core = cores[u_usize] == 1;
+            let u_word = levels[u_usize];
+            let u_level = level_word_level(u_word);
+            let u_is_core = level_word_is_core(u_word);
             let so = rev_off[u_usize] as usize;
             let eo = rev_off[u_usize + 1] as usize;
             for e in so..eo {
                 let v = rev_from[e];
                 let v_usize = v as usize;
-                let v_level = levels[v_usize];
-                if v_level == UNKNOWN_LEVEL {
+                let v_word = levels[v_usize];
+                if level_word_is_unknown(v_word) {
                     continue;
                 }
                 if !no_level {
-                    let core_core = u_is_core && cores[v_usize] == 1;
+                    let v_level = level_word_level(v_word);
+                    let core_core = u_is_core && level_word_is_core(v_word);
                     if !core_core && v_level <= u_level {
                         continue;
                     }
@@ -372,8 +381,12 @@ mod tests {
         b.extend_from_slice(&0u16.to_le_bytes());
         b.extend_from_slice(&(nodes.len() as u32).to_le_bytes());
         b.extend_from_slice(&(edges.len() as u32).to_le_bytes());
-        for n in nodes { b.extend(n); }
-        for e in edges { b.extend(e); }
+        for n in nodes {
+            b.extend(n);
+        }
+        for e in edges {
+            b.extend(e);
+        }
         b
     }
 
@@ -425,7 +438,12 @@ mod tests {
             enc_edge(1, 2, 0.002, 0.0, 100.0, 0),
         ];
         let csr = build_csr(&[make_tile(nodes, edges)]);
-        let r = ch_query(&csr, idx_of(&csr, 0), idx_of(&csr, 2), &ChQueryOpts::default());
+        let r = ch_query(
+            &csr,
+            idx_of(&csr, 0),
+            idx_of(&csr, 2),
+            &ChQueryOpts::default(),
+        );
         assert!((r.distance - 200.0).abs() < 1e-6, "dist={}", r.distance);
     }
 
