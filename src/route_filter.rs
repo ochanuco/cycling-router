@@ -73,7 +73,7 @@ pub fn route_distances(route_lonlats: &[f64], shop_lonlats: &[f64]) -> Vec<f32> 
             shop_lonlats[k * 2 + 1],
             cos_ref_lat,
         );
-        let mut min_d = f64::INFINITY;
+        let mut min_d2 = f64::INFINITY;
         for i in 1..n {
             let ax = rx[i - 1];
             let ay = ry[i - 1];
@@ -82,10 +82,10 @@ pub fn route_distances(route_lonlats: &[f64], shop_lonlats: &[f64]) -> Vec<f32> 
             let abx = bx - ax;
             let aby = by - ay;
             let ab2 = abx * abx + aby * aby;
-            let d = if ab2 == 0.0 {
+            let d2 = if ab2 == 0.0 {
                 let dx = px - ax;
                 let dy = py - ay;
-                (dx * dx + dy * dy).sqrt()
+                dx * dx + dy * dy
             } else {
                 let apx = px - ax;
                 let apy = py - ay;
@@ -99,13 +99,13 @@ pub fn route_distances(route_lonlats: &[f64], shop_lonlats: &[f64]) -> Vec<f32> 
                 let cy = ay + aby * t;
                 let dx = px - cx;
                 let dy = py - cy;
-                (dx * dx + dy * dy).sqrt()
+                dx * dx + dy * dy
             };
-            if d < min_d {
-                min_d = d;
+            if d2 < min_d2 {
+                min_d2 = d2;
             }
         }
-        out[k] = min_d as f32;
+        out[k] = min_d2.sqrt() as f32;
     }
 
     out

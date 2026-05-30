@@ -11,6 +11,9 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
 const INF: f64 = f64::INFINITY;
+const NO_PARENT: u32 = u32::MAX;
+const SETTLED_F: u8 = 1;
+const SETTLED_B: u8 = 2;
 
 #[derive(Clone, Copy)]
 struct HeapEntry {
@@ -86,13 +89,12 @@ pub fn ch_query(csr: &Csr, start_idx: u32, goal_idx: u32, opts: &ChQueryOpts) ->
     let mut dist_b: Vec<f64> = vec![INF; nc];
     dist_f[start_idx as usize] = 0.0;
     dist_b[goal_idx as usize] = 0.0;
-    let mut parent_f: Vec<i32> = vec![-1; nc];
-    let mut parent_b: Vec<i32> = vec![-1; nc];
-    let mut settled_f: Vec<u8> = vec![0; nc];
-    let mut settled_b: Vec<u8> = vec![0; nc];
+    let mut parent_f: Vec<u32> = vec![NO_PARENT; nc];
+    let mut parent_b: Vec<u32> = vec![NO_PARENT; nc];
+    let mut settled: Vec<u8> = vec![0; nc];
 
-    let mut heap_f: BinaryHeap<HeapEntry> = BinaryHeap::new();
-    let mut heap_b: BinaryHeap<HeapEntry> = BinaryHeap::new();
+    let mut heap_f: BinaryHeap<HeapEntry> = BinaryHeap::with_capacity(1024);
+    let mut heap_b: BinaryHeap<HeapEntry> = BinaryHeap::with_capacity(1024);
     heap_f.push(HeapEntry { key: 0.0, idx: start_idx });
     heap_b.push(HeapEntry { key: 0.0, idx: goal_idx });
 
@@ -146,45 +148,47 @@ pub fn ch_query(csr: &Csr, start_idx: u32, goal_idx: u32, opts: &ChQueryOpts) ->
                 Some(e) => e,
                 None => break,
             };
-            if settled_f[u as usize] != 0 {
+            let u_usize = u as usize;
+            if settled[u_usize] & SETTLED_F != 0 {
                 continue;
             }
-            if d > dist_f[u as usize] {
+            if d > dist_f[u_usize] {
                 continue;
             }
-            settled_f[u as usize] = 1;
+            settled[u_usize] |= SETTLED_F;
             settled_count += 1;
-            let db = dist_b[u as usize];
-            if db.is_finite() {
+            let db = dist_b[u_usize];
+            if db != INF {
                 let sum = d + db;
                 if sum < best {
                     best = sum;
                     meeting = u as i32;
                 }
             }
-            let u_level = levels[u as usize];
-            let u_is_core = cores[u as usize] == 1;
-            let so = fwd_off[u as usize] as usize;
-            let eo = fwd_off[(u as usize) + 1] as usize;
+            let u_level = levels[u_usize];
+            let u_is_core = cores[u_usize] == 1;
+            let so = fwd_off[u_usize] as usize;
+            let eo = fwd_off[u_usize + 1] as usize;
             for e in so..eo {
                 let v = fwd_to[e];
-                let v_level = levels[v as usize];
+                let v_usize = v as usize;
+                let v_level = levels[v_usize];
                 if v_level == UNKNOWN_LEVEL {
                     continue;
                 }
                 if !no_level {
-                    let core_core = u_is_core && cores[v as usize] == 1;
+                    let core_core = u_is_core && cores[v_usize] == 1;
                     if !core_core && v_level <= u_level {
                         continue;
                     }
                 }
                 let nd = d + fwd_cost[e] as f64;
-                if nd < dist_f[v as usize] {
-                    dist_f[v as usize] = nd;
-                    parent_f[v as usize] = u as i32;
+                if nd < dist_f[v_usize] {
+                    dist_f[v_usize] = nd;
+                    parent_f[v_usize] = u;
                     heap_f.push(HeapEntry { key: nd, idx: v });
-                    let dbv = dist_b[v as usize];
-                    if dbv.is_finite() {
+                    let dbv = dist_b[v_usize];
+                    if dbv != INF {
                         let sum = nd + dbv;
                         if sum < best {
                             best = sum;
@@ -199,45 +203,47 @@ pub fn ch_query(csr: &Csr, start_idx: u32, goal_idx: u32, opts: &ChQueryOpts) ->
                 Some(e) => e,
                 None => break,
             };
-            if settled_b[u as usize] != 0 {
+            let u_usize = u as usize;
+            if settled[u_usize] & SETTLED_B != 0 {
                 continue;
             }
-            if d > dist_b[u as usize] {
+            if d > dist_b[u_usize] {
                 continue;
             }
-            settled_b[u as usize] = 1;
+            settled[u_usize] |= SETTLED_B;
             settled_count += 1;
-            let df = dist_f[u as usize];
-            if df.is_finite() {
+            let df = dist_f[u_usize];
+            if df != INF {
                 let sum = df + d;
                 if sum < best {
                     best = sum;
                     meeting = u as i32;
                 }
             }
-            let u_level = levels[u as usize];
-            let u_is_core = cores[u as usize] == 1;
-            let so = rev_off[u as usize] as usize;
-            let eo = rev_off[(u as usize) + 1] as usize;
+            let u_level = levels[u_usize];
+            let u_is_core = cores[u_usize] == 1;
+            let so = rev_off[u_usize] as usize;
+            let eo = rev_off[u_usize + 1] as usize;
             for e in so..eo {
                 let v = rev_from[e];
-                let v_level = levels[v as usize];
+                let v_usize = v as usize;
+                let v_level = levels[v_usize];
                 if v_level == UNKNOWN_LEVEL {
                     continue;
                 }
                 if !no_level {
-                    let core_core = u_is_core && cores[v as usize] == 1;
+                    let core_core = u_is_core && cores[v_usize] == 1;
                     if !core_core && v_level <= u_level {
                         continue;
                     }
                 }
                 let nd = d + rev_cost[e] as f64;
-                if nd < dist_b[v as usize] {
-                    dist_b[v as usize] = nd;
-                    parent_b[v as usize] = u as i32;
+                if nd < dist_b[v_usize] {
+                    dist_b[v_usize] = nd;
+                    parent_b[v_usize] = u;
                     heap_b.push(HeapEntry { key: nd, idx: v });
-                    let dfv = dist_f[v as usize];
-                    if dfv.is_finite() {
+                    let dfv = dist_f[v_usize];
+                    if dfv != INF {
                         let sum = dfv + nd;
                         if sum < best {
                             best = sum;
@@ -261,17 +267,17 @@ pub fn ch_query(csr: &Csr, start_idx: u32, goal_idx: u32, opts: &ChQueryOpts) ->
     // Reconstruct path: start → ... → meeting → ... → goal (forward direction).
     let m = meeting as u32;
     let mut fwd_chain: Vec<u32> = vec![m];
-    let mut cur = m as i32;
-    while parent_f[cur as usize] != -1 {
+    let mut cur = m;
+    while parent_f[cur as usize] != NO_PARENT {
         cur = parent_f[cur as usize];
-        fwd_chain.push(cur as u32);
+        fwd_chain.push(cur);
     }
     fwd_chain.reverse();
     let mut back_chain: Vec<u32> = Vec::new();
-    cur = m as i32;
-    while parent_b[cur as usize] != -1 {
+    cur = m;
+    while parent_b[cur as usize] != NO_PARENT {
         cur = parent_b[cur as usize];
-        back_chain.push(cur as u32);
+        back_chain.push(cur);
     }
     let mut path_idx = fwd_chain;
     path_idx.extend(back_chain);
@@ -371,6 +377,10 @@ mod tests {
         b
     }
 
+    fn idx_of(csr: &crate::csr::Csr, id: u64) -> u32 {
+        csr.ids.iter().position(|&x| x == id).unwrap() as u32
+    }
+
     #[test]
     fn chain_returns_total_distance() {
         // 0 → 1 → 2 → 3, levels 0..3, costs 100 each
@@ -386,8 +396,8 @@ mod tests {
             enc_edge(12, 13, 0.003, 0.0, 100.0, 0),
         ];
         let csr = build_csr(&[make_tile(nodes, edges)]);
-        let start = *csr.id_to_idx.get(&10).unwrap();
-        let goal = *csr.id_to_idx.get(&13).unwrap();
+        let start = idx_of(&csr, 10);
+        let goal = idx_of(&csr, 13);
         let r = ch_query(&csr, start, goal, &ChQueryOpts::default());
         assert!((r.distance - 300.0).abs() < 1e-6, "dist={}", r.distance);
         assert_eq!(r.path_idx.len(), 4);
@@ -415,7 +425,7 @@ mod tests {
             enc_edge(1, 2, 0.002, 0.0, 100.0, 0),
         ];
         let csr = build_csr(&[make_tile(nodes, edges)]);
-        let r = ch_query(&csr, *csr.id_to_idx.get(&0).unwrap(), *csr.id_to_idx.get(&2).unwrap(), &ChQueryOpts::default());
+        let r = ch_query(&csr, idx_of(&csr, 0), idx_of(&csr, 2), &ChQueryOpts::default());
         assert!((r.distance - 200.0).abs() < 1e-6, "dist={}", r.distance);
     }
 
@@ -432,9 +442,9 @@ mod tests {
             enc_edge(0, 2, 0.002, 0.0, 200.0, 1),
         ];
         let csr = build_csr(&[make_tile(nodes, edges)]);
-        let i0 = *csr.id_to_idx.get(&0).unwrap();
-        let i1 = *csr.id_to_idx.get(&1).unwrap();
-        let i2 = *csr.id_to_idx.get(&2).unwrap();
+        let i0 = idx_of(&csr, 0);
+        let i1 = idx_of(&csr, 1);
+        let i2 = idx_of(&csr, 2);
         let mut out = Vec::new();
         unpack_ch_edge(&csr, i0, i2, &mut out);
         assert_eq!(out, vec![i1, i2]);

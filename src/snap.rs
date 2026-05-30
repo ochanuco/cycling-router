@@ -7,6 +7,7 @@ use crate::csr::Csr;
 
 const EARTH_R: f64 = 6378137.0;
 
+#[inline]
 pub fn haversine_m(a_lon: f64, a_lat: f64, b_lon: f64, b_lat: f64) -> f64 {
     let to_rad = std::f64::consts::PI / 180.0;
     let d_lat = (b_lat - a_lat) * to_rad;
@@ -23,33 +24,42 @@ pub struct SnapResult {
     pub distance_m: f64,
 }
 
+#[inline]
 pub fn snap(csr: &Csr, lon: f64, lat: f64) -> Option<SnapResult> {
     if csr.node_count == 0 {
         return None;
     }
     let cos_lat = (lat * std::f64::consts::PI / 180.0).cos();
-    let mut best_idx: i64 = -1;
+    let mut best_idx = u32::MAX;
     let mut best_sq: f64 = f64::INFINITY;
     let n = csr.node_count as usize;
-    for i in 0..n {
-        let ln = csr.lons[i] as f64;
+    let mut i = 0usize;
+    while i < n {
+        let ln = unsafe { *csr.lons.get_unchecked(i) } as f64;
         if ln.is_nan() {
+            i += 1;
             continue;
         }
-        let la = csr.lats[i] as f64;
+        let la = unsafe { *csr.lats.get_unchecked(i) } as f64;
         let dlon = (ln - lon) * cos_lat;
         let dlat = la - lat;
         let sq = dlon * dlon + dlat * dlat;
         if sq < best_sq {
             best_sq = sq;
-            best_idx = i as i64;
+            best_idx = i as u32;
         }
+        i += 1;
     }
-    if best_idx < 0 {
+    if best_idx == u32::MAX {
         return None;
     }
     let i = best_idx as usize;
-    let id = csr.ids[i];
-    let d = haversine_m(lon, lat, csr.lons[i] as f64, csr.lats[i] as f64);
+    let id = unsafe { *csr.ids.get_unchecked(i) };
+    let d = haversine_m(
+        lon,
+        lat,
+        unsafe { *csr.lons.get_unchecked(i) } as f64,
+        unsafe { *csr.lats.get_unchecked(i) } as f64,
+    );
     Some(SnapResult { idx: best_idx as u32, id, distance_m: d })
 }
