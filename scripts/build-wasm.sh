@@ -24,5 +24,11 @@ done
 # worker.mjs 側はこの wrapper を import する。
 cp "$CRATE/js/worker.js" "$DIST/bundler/router_wasm_worker.js"
 
+# 配布物に MIT ライセンスを同梱する (wasm-pack は crate ディレクトリ直下しか
+# 見ないため、workspace ルートの LICENSE を出力へコピーする)。
+for target in bundler nodejs web; do
+  cp "$ROOT/LICENSE" "$DIST/$target/LICENSE"
+done
+
 echo "==> built:"
-find "$DIST" -maxdepth 2 -type f -name "*.wasm" -o -maxdepth 2 -name "*worker.js" | sort
+find "$DIST" -maxdepth 2 -type f \( -name "*.wasm" -o -name "*worker.js" \) | sort

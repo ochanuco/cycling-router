@@ -249,7 +249,10 @@ fn to_err_with(msg: &str, meta: &RouteMeta) -> JsValue {
     serde_wasm_bindgen::to_value(&RouteErrWithMeta { error: msg, meta }).unwrap_or(JsValue::NULL)
 }
 
-// timing helper proxying to chquery module's now_ms
+// route_ch の各フェーズ (CSR 構築 / CH クエリ / fallback) を計測するための時刻取得。
+// router-core の chquery にも同名の内部関数があるが、あちらは private なので
+// proxy ではなく同じ実装を持つ。wasm32 では SystemTime が使えないため js_sys::Date、
+// ネイティブでは SystemTime を使う。
 #[cfg(target_arch = "wasm32")]
 fn chquery_now_ms() -> u64 {
     js_sys::Date::now() as u64
