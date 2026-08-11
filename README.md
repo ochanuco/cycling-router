@@ -1,64 +1,58 @@
-# rust-router
+# cycling-router
 
-Cycling A\* router compiled to wasm32 — PoC for comparing Rust/WASM vs the
-existing JS implementation in `lib/cycling/tiled_router.js`.
+自転車ルーティングのコア実装。CSR グラフ構築、Contraction Hierarchies (CH) クエリ、座標スナップ、ルートと補給地点の距離計算を Rust で提供する。
 
-## Build
+[ride-oasis](https://github.com/ochanuco/ride-oasis) から切り出したもので、WASM として Cloudflare Workers 上で動くことを主眼に置いている。
+
+## クレート構成
+
+| クレート | 役割 | 依存 |
+|---|---|---|
+| `router-core` | アルゴリズム本体。CSR / CH / snap / route_filter / A* | なし（wasm32 ターゲット時のみ `js-sys`） |
+| `router-wasm` | wasm-bindgen adapter。JS 境界の型変換だけを担う | `router-core`, `wasm-bindgen`, `js-sys` |
+| `router-cli` | CH 前計算バイナリ `ch-preprocess` | なし |
+
+`router-core` は JS 境界を持たない。唯一 `js-sys` に触れるのは、wasm32 で `std::time::SystemTime::now()` が使えないために CH クエリの time budget 判定へ `js_sys::Date` を使う箇所（`chquery.rs` の `now_ms`）で、これは target-specific dependency なのでネイティブビルドでは一切引かれない。
+
+### route_ch がコアではなく adapter にある理由
+
+`route_ch` は `Uint8Array` を受け取り `JsValue` を返す、まさに JS 境界の関数で、中身は core の部品（CSR 構築 → snap → CH クエリ → shortcut 展開）を順に呼ぶオーケストレーションでしかない。そのため `router-wasm` に置いている。ネイティブからルート計算を呼ぶ必要が出た時点で、この手続きを `router-core` に引き上げる。
+
+## ビルド
+
+WASM（3 ターゲットを `dist/` へ出力し、Workers 用 wrapper を同梱する）:
 
 ```bash
-mise exec -- wasm-pack build --target nodejs --release
+./scripts/build-wasm.sh
 ```
 
-Outputs to `pkg/`:
-- `rust_router.js` — JS glue (CommonJS for Node)
-- `rust_router_bg.wasm` — compiled WASM module
-- `rust_router.d.ts` — TypeScript declarations
+| 出力 | 用途 |
+|---|---|
+| `dist/bundler/` | Cloudflare Workers。`router_wasm_worker.js` 経由で使う |
+| `dist/nodejs/` | Node からの検証・ベンチ |
+| `dist/web/` | ブラウザ |
 
-For browser/Worker: use `--target web` or `--target bundler`.
-
-## Benchmark
-
-After building:
+ネイティブ:
 
 ```bash
-node scripts/bench_wasm_vs_js.mjs
+cargo test --workspace
+cargo build -p router-cli --release   # → target/release/ch-preprocess
 ```
 
-Compares JS aStarOnView vs Rust/WASM `astar()` on the same synthetic graph
-(20x20 grid + 15x15 grid) and reports timings.
+## Cloudflare Workers から使う
 
-## Status
+wasm-pack の `--target bundler` が生成する `router_wasm.js` は `import * as wasm from "./router_wasm_bg.wasm"` という namespace-import を使い、Workers の bundler が受け付けない。このため手書きの wrapper (`crates/router-wasm/js/worker.js` → `dist/bundler/router_wasm_worker.js`) を挟み、`[[rules]] type = "CompiledWasm"` 経由で得た `WebAssembly.Module` を遅延インスタンス化する。
 
-- [x] forward A\* implementation in Rust (parity with JS)
-- [x] cargo unit tests pass
-- [x] wasm-pack build verified (24KB optimized wasm)
-- [x] benchmark vs JS (`scripts/bench_wasm_vs_js.mjs`)
-- [ ] decode binary tile format directly in Rust (zero-copy)
-- [ ] Workers integration
+遅延にしているのは、トップレベルで `new WebAssembly.Instance()` が throw すると Worker 全体が落ちて呼び出し側の JS フォールバックに到達できないため。
 
-This is an exploratory branch. Not for merge yet.
+```js
+import { route_ch, route_distances } from "./router_wasm_worker.js";
+```
 
-## Benchmark results (synthetic grids)
+## 配布
 
-| grid     | JS aStarOnView | WASM astar | speedup |
-|----------|---------------:|-----------:|--------:|
-| 10x10    |          0.23ms|      0.02ms|  11.5x |
-| 20x20    |          0.58ms|      0.07ms|   7.9x |
-| 50x50    |          1.62ms|      0.21ms|   7.7x |
-| 100x100  |          4.76ms|      1.04ms|   4.6x |
+tag (`v*`) を push すると CI が 3 ターゲット分をビルドし、`cycling-router-wasm-<tag>.tar.gz` を GitHub Release に添付する。ビルド成果物は git に含めない。
 
-Both compute identical optimal distances (`match ✓`).
+## ライセンス
 
-For real OSM workloads where A\* heuristic prunes search (settled << N), the
-speedup will be smaller (likely 2-3x). The 100x100 grid is the closest to a
-"settled = total" worst case; actual Kansai queries settle ~10k of millions
-of nodes.
-
-## When to consider integrating
-
-- Worker CPU is the bottleneck even after CH integration (PR #2b 元案)
-- Need >50km routes at <1s warm latency
-- Cold-start cost of wasm-instantiate (~30-50ms) is acceptable
-
-For current Kansai 18km-cap deployment, edge cache + NBA\* already meets
-target. WASM is a "kept ready" optimization rather than a near-term need.
+MIT

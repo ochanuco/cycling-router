@@ -1,29 +1,22 @@
-[package]
-name = "rust-router"
-version = "0.2.0"
+[workspace]
+resolver = "2"
+members = ["crates/router-core", "crates/router-wasm", "crates/router-cli"]
+
+[workspace.package]
+version = "0.3.0"
 edition = "2021"
-description = "Cycling router: WASM A* PoC (lib) + native CH preprocessor (bin)"
-publish = false
+license = "MIT"
+repository = "https://github.com/ochanuco/cycling-router"
 
-[lib]
-crate-type = ["cdylib", "rlib"]
-
-# Native binary for offline CH preprocessing. Reads nodes.ndjson + edges.ndjson
-# emitted by scripts/cycling_build_graph.js and writes ch_levels.ndjson +
-# ch_edges.ndjson compatible with scripts/cycling_ch_tile_split.js. Compiled
-# only when targeting host arch (`cargo build --release --bin ch-preprocess`).
-[[bin]]
-name = "ch-preprocess"
-path = "src/bin/ch_preprocess.rs"
-
-[dependencies]
+[workspace.dependencies]
+router-core = { path = "crates/router-core" }
+serde = { version = "1", features = ["derive"] }
 wasm-bindgen = "0.2"
 js-sys = "0.3"
-# serde-wasm-bindgen を入れて、Rust 構造体 → JsValue (JS object) 変換を
-# wasm_bindgen::to_value(&v) で行う。RouteResult を直接 JS に返すのに使う。
-serde = { version = "1", features = ["derive"] }
 serde-wasm-bindgen = "0.6"
 
+# WASM は Cloudflare Workers の 128MB / 30s 制約下で動くため、サイズと速度の
+# 両方を詰める。lto + codegen-units=1 は wasm バイナリを実測で縮める。
 [profile.release]
 opt-level = 3
 lto = true
