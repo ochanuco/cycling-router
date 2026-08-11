@@ -1,8 +1,6 @@
 target/
-pkg-node/
-pkg-web/
-Cargo.lock
+dist/
 
-# pkg/ は worker.mjs (Workers) が import するので git に含める。
-# pkg-web/ は frontend/wasm/ へ cp 済なので git 不要。
-# 再生成は `npm run wasm:build`。
+# ビルド成果物 (WASM) は git に含めず、tag push 時の CI が GitHub Release に
+# 添付する。利用側 (ride-oasis) は Release からダウンロードする。
+# ローカル生成は `./scripts/build-wasm.sh`。

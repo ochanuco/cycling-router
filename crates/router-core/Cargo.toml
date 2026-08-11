@@ -1,0 +1,15 @@
+[package]
+name = "router-core"
+description = "Cycling router core: CSR graph, Contraction Hierarchies query, snapping, route distance filtering"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+
+# wasm32 ターゲットでは `std::time::SystemTime::now()` が使えないため、
+# CH クエリの time budget 判定にだけ js_sys::Date を使う (chquery.rs の
+# `now_ms`)。ネイティブビルド (router-cli / cargo test) では引かれない。
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = { workspace = true }

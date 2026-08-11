@@ -1,0 +1,43 @@
+name: Release
+
+# tag を push すると WASM 成果物を作って Release に添付する。
+# 利用側 (ride-oasis) はこの Release からダウンロードして Workers にバンドルする。
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - name: Build wasm (bundler / nodejs / web)
+        run: ./scripts/build-wasm.sh
+
+      - name: Package
+        run: tar -czf cycling-router-wasm-${{ github.ref_name }}.tar.gz -C dist .
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            "cycling-router-wasm-${{ github.ref_name }}.tar.gz"
