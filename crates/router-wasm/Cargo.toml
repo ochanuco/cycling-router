@@ -1,0 +1,18 @@
+[package]
+name = "router-wasm"
+description = "wasm-bindgen adapter for router-core (Cloudflare Workers / browser)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# cdylib: wasm-pack が読む WASM 本体。rlib: cargo test / 他 crate からの参照用。
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+router-core = { workspace = true }
+serde = { workspace = true }
+wasm-bindgen = { workspace = true }
+js-sys = { workspace = true }
+serde-wasm-bindgen = { workspace = true }

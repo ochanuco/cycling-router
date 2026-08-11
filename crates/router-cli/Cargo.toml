@@ -1,0 +1,16 @@
+[package]
+name = "router-cli"
+description = "Native CH preprocessor for the cycling graph"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# ride-oasis 側の npm script が `ch-preprocess` の名前で呼ぶため維持する。
+[[bin]]
+name = "ch-preprocess"
+path = "src/main.rs"
+
+# CH 前計算は自己完結した実装 (src/main.rs) で router-core を参照しない。
+# 将来クエリ側と共通化するなら router-core を足す。
+[dependencies]
