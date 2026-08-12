@@ -173,11 +173,11 @@ dependencies = [
 
 [[package]]
 name = "router-cli"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "router-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "js-sys",
  "wasm-bindgen-test",
@@ -185,7 +185,7 @@ dependencies = [
 
 [[package]]
 name = "router-wasm"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "js-sys",
  "router-core",
