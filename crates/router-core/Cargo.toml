@@ -13,3 +13,9 @@ repository.workspace = true
 # `now_ms`)。ネイティブビルド (router-cli / cargo test) では引かれない。
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = { workspace = true }
+
+# route_filter の simd128 実装はネイティブでは一切コンパイルされないため
+# `cargo test` では検証できない。`wasm-pack test --node` で走らせる差分テスト
+# (route_filter.rs の simd_tests) 用。
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = { workspace = true }
