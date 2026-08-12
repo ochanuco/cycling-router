@@ -244,10 +244,18 @@ fn witness_costs_multi(
     result.resize(targets.len(), f32::INFINITY);
 
     // Index targets by node for O(1) hit check during search.
+    //
+    // targets はノード重複なしであることが前提。重複すると後勝ちで上書きされ、
+    // 先に積んだ位置の result が INFINITY のまま残って「witness なし」と誤判定
+    // される。呼び出し側で畳んでから渡すこと。
     let mut target_idx_by_node: std::collections::HashMap<u32, usize> =
         std::collections::HashMap::with_capacity(targets.len());
     let mut max_cap = 0.0_f32;
     for (i, &t) in targets.iter().enumerate() {
+        debug_assert!(
+            !target_idx_by_node.contains_key(&t),
+            "witness_costs_multi: targets に重複ノード {t} が含まれている"
+        );
         target_idx_by_node.insert(t, i);
         if target_caps[i] > max_cap {
             max_cap = target_caps[i];
@@ -350,6 +358,80 @@ struct ShortcutRec {
 
 const MAX_ACTIVE_DEGREE: usize = 64;
 
+/// 同じ相手ノードへの平行辺を、最小コストの 1 本へ畳む (初出順は保つ)。
+///
+/// `graph.fwd` / `graph.rev` は shortcut 挿入のたびに push するだけで重複排除を
+/// しないため、contraction が進むほど平行辺が増える。コストの高い in-edge は
+/// 低い方に支配される (どの相手についても shortcut コストが必ず大きい) ので、
+/// 畳まないと同じ `u` に対して witness search を複数回走らせたうえ、支配された
+/// shortcut が余分に残る。
+///
+/// 呼び出し時点で `edges.len()` は `MAX_ACTIVE_DEGREE` 以下なので線形走査で足りる。
+fn dedup_edges_by_min_cost(edges: &mut Vec<Edge>) {
+    let mut kept = 0usize;
+    for i in 0..edges.len() {
+        let e = edges[i];
+        match edges[..kept].iter().position(|k| k.other == e.other) {
+            Some(j) => {
+                if e.cost < edges[j].cost {
+                    edges[j].cost = e.cost;
+                }
+            }
+            None => {
+                edges[kept] = e;
+                kept += 1;
+            }
+        }
+    }
+    edges.truncate(kept);
+}
+
+/// in-edge `u -> v` に対する witness search の target 一覧と shortcut コスト
+/// 上限を組み立てる。`u` 自身は対象外。
+///
+/// `outs` にも平行辺が入りうるが、`targets` に同じノードを 2 回積むと
+/// `witness_costs_multi` の node -> index マップで後勝ちの上書きが起き、先に
+/// 積んだ位置の結果が `INFINITY` のまま残る。すると
+/// `witness_results[ti] <= sc_cost` が必ず false になり、witness が存在しても
+/// shortcut が入る — CH の中核が無効化される。ノード単位に畳み、cap は小さい
+/// 方を残す。
+///
+/// `targets` / `target_caps` / `target_pos` は呼び出し側の再利用バッファで、
+/// ここで clear してから詰め直す。
+fn build_targets(
+    outs: &[Edge],
+    u: u32,
+    in_cost: f32,
+    targets: &mut Vec<u32>,
+    target_caps: &mut Vec<f32>,
+    target_pos: &mut std::collections::HashMap<u32, usize>,
+) {
+    use std::collections::hash_map::Entry;
+
+    targets.clear();
+    target_caps.clear();
+    target_pos.clear();
+    for out_e in outs {
+        if out_e.other == u {
+            continue;
+        }
+        let cap = in_cost + out_e.cost;
+        match target_pos.entry(out_e.other) {
+            Entry::Occupied(slot) => {
+                let i = *slot.get();
+                if cap < target_caps[i] {
+                    target_caps[i] = cap;
+                }
+            }
+            Entry::Vacant(slot) => {
+                slot.insert(targets.len());
+                targets.push(out_e.other);
+                target_caps.push(cap);
+            }
+        }
+    }
+}
+
 fn build_ch(graph: &mut Graph, contract_fraction: f64) -> (Vec<u32>, Vec<bool>, Vec<ShortcutRec>) {
     let n = graph.n;
     let order = compute_order(graph);
@@ -367,6 +449,10 @@ fn build_ch(graph: &mut Graph, contract_fraction: f64) -> (Vec<u32>, Vec<bool>, 
     let mut targets: Vec<u32> = Vec::with_capacity(64);
     let mut target_caps: Vec<f32> = Vec::with_capacity(64);
     let mut witness_results: Vec<f32> = Vec::with_capacity(64);
+    // targets を組み立てる際の「ノード -> targets 内の位置」。ループごとに
+    // clear して使い回す (毎回確保すると contraction 全体で効いてくる)。
+    let mut target_pos: std::collections::HashMap<u32, usize> =
+        std::collections::HashMap::with_capacity(64);
 
     let t0 = Instant::now();
     let mut last_report = Instant::now();
@@ -385,7 +471,7 @@ fn build_ch(graph: &mut Graph, contract_fraction: f64) -> (Vec<u32>, Vec<bool>, 
         }
         levels[v as usize] = lvl as u32;
 
-        let ins: Vec<Edge> = graph.rev[v as usize]
+        let mut ins: Vec<Edge> = graph.rev[v as usize]
             .iter()
             .filter(|e| !graph.contracted[e.other as usize])
             .copied()
@@ -413,20 +499,22 @@ fn build_ch(graph: &mut Graph, contract_fraction: f64) -> (Vec<u32>, Vec<bool>, 
             continue;
         }
 
+        // MAX_ACTIVE_DEGREE は explosion guard なので生の次数で判定したく、
+        // 畳むのは上のチェックを通したあとにする。
+        dedup_edges_by_min_cost(&mut ins);
+
         // For each in-edge u -> v, do ONE multi-target witness search to all
         // outs. This batches the heap setup cost across N targets.
         for in_e in &ins {
             let u = in_e.other;
-            // Build target list (skip u itself) with their shortcut cost caps.
-            targets.clear();
-            target_caps.clear();
-            for out_e in &outs {
-                if out_e.other == u {
-                    continue;
-                }
-                targets.push(out_e.other);
-                target_caps.push(in_e.cost + out_e.cost);
-            }
+            build_targets(
+                &outs,
+                u,
+                in_e.cost,
+                &mut targets,
+                &mut target_caps,
+                &mut target_pos,
+            );
             if targets.is_empty() {
                 continue;
             }
@@ -619,4 +707,95 @@ fn main() -> std::io::Result<()> {
     eprintln!("done in {:.1}s", t0.elapsed().as_secs_f64());
     let _ = fs::metadata(dir.join("ch_levels.ndjson"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn edge(other: u32, cost: f32) -> Edge {
+        Edge {
+            other,
+            cost,
+            via: -1,
+        }
+    }
+
+    #[test]
+    fn 平行辺は最小コストの一本に畳まれ初出順が保たれる() {
+        let mut edges = vec![edge(7, 30.0), edge(3, 10.0), edge(7, 12.0), edge(3, 25.0)];
+        dedup_edges_by_min_cost(&mut edges);
+
+        assert_eq!(edges.len(), 2);
+        // 初出順は 7, 3
+        assert_eq!(edges[0].other, 7);
+        assert_eq!(edges[0].cost, 12.0);
+        assert_eq!(edges[1].other, 3);
+        assert_eq!(edges[1].cost, 10.0);
+    }
+
+    #[test]
+    fn 重複のない辺集合は畳んでも変化しない() {
+        let mut edges = vec![edge(1, 5.0), edge(2, 6.0), edge(3, 7.0)];
+        let before: Vec<(u32, f32)> = edges.iter().map(|e| (e.other, e.cost)).collect();
+        dedup_edges_by_min_cost(&mut edges);
+        let after: Vec<(u32, f32)> = edges.iter().map(|e| (e.other, e.cost)).collect();
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn 空の辺集合を畳んでも落ちない() {
+        let mut edges: Vec<Edge> = Vec::new();
+        dedup_edges_by_min_cost(&mut edges);
+        assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn targetsはノード単位に畳まれcapは最小が残る() {
+        // u -> v -> w が 2 本 (cost 20 と 5)。畳まないと targets に w が 2 回入り、
+        // witness_costs_multi の node -> index マップで先頭が上書きされて
+        // 「witness なし」と誤判定される。
+        let outs = vec![edge(9, 20.0), edge(4, 3.0), edge(9, 5.0)];
+        let mut targets = Vec::new();
+        let mut caps = Vec::new();
+        let mut pos = std::collections::HashMap::new();
+
+        build_targets(&outs, 1, 100.0, &mut targets, &mut caps, &mut pos);
+
+        assert_eq!(targets, vec![9, 4]);
+        // in_cost 100 + min(20, 5) = 105
+        assert_eq!(caps, vec![105.0, 103.0]);
+        // 重複がないこと = witness_costs_multi の前提を満たす
+        let uniq: std::collections::HashSet<u32> = targets.iter().copied().collect();
+        assert_eq!(uniq.len(), targets.len());
+    }
+
+    #[test]
+    fn targetsから自ノードは除外される() {
+        let outs = vec![edge(1, 20.0), edge(2, 3.0)];
+        let mut targets = Vec::new();
+        let mut caps = Vec::new();
+        let mut pos = std::collections::HashMap::new();
+
+        build_targets(&outs, 1, 10.0, &mut targets, &mut caps, &mut pos);
+
+        assert_eq!(targets, vec![2]);
+        assert_eq!(caps, vec![13.0]);
+    }
+
+    #[test]
+    fn build_targetsはバッファを再利用しても前回の内容を残さない() {
+        let mut targets = Vec::new();
+        let mut caps = Vec::new();
+        let mut pos = std::collections::HashMap::new();
+
+        let first = vec![edge(5, 1.0), edge(6, 2.0)];
+        build_targets(&first, 0, 0.0, &mut targets, &mut caps, &mut pos);
+        assert_eq!(targets, vec![5, 6]);
+
+        let second = vec![edge(8, 4.0)];
+        build_targets(&second, 0, 0.0, &mut targets, &mut caps, &mut pos);
+        assert_eq!(targets, vec![8]);
+        assert_eq!(caps, vec![4.0]);
+    }
 }
