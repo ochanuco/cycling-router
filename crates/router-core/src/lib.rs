@@ -39,6 +39,36 @@ mod tests {
     }
 
     #[test]
+    fn invalid_edge_endpoints_are_ignored_not_folded_into_node_zero() {
+        // f64 -> u32 は saturating cast なので、負値 / NaN / 非整数を通すと
+        // 「ノード 0 への辺」に化ける。0 と 2 は本来つながっていないので、
+        // これらの辺が採用されると 0 -> 2 が到達可能になってしまう。
+        let nodes: Vec<f64> = vec![135.0, 34.0, 135.001, 34.0, 135.002, 34.0];
+        let bad_edges: Vec<f64> = vec![
+            -1.0,
+            2.0,
+            10.0, // from が負 -> 0 に化ける
+            f64::NAN,
+            2.0,
+            10.0, // from が NaN -> 0 に化ける
+            0.5,
+            2.0,
+            10.0, // from が非整数 -> 0 に化ける
+            0.0,
+            -1.0,
+            10.0, // to が負 -> 0 に化ける
+            0.0,
+            2.0,
+            f64::NAN, // コストが NaN
+            0.0,
+            2.0,
+            -5.0, // コストが負
+        ];
+        let r = astar(&nodes, &bad_edges, 0, 2);
+        assert_eq!(r, vec![f64::INFINITY], "不正な辺は採用されないこと");
+    }
+
+    #[test]
     fn unreachable() {
         let nodes: Vec<f64> = vec![135.0, 34.0, 135.001, 34.0];
         let edges: Vec<f64> = vec![];

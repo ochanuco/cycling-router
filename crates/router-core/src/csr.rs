@@ -1,7 +1,7 @@
 //! CH-mode ephemeral CSR built from tile binary buffers in WASM context.
 //!
-//! Port of `lib/cycling/ch_csr.js` with the same data layout: Uint32 offsets
-//! + Uint32 to / Float32 cost / Uint32 viaId per direction. Nodes carry
+//! Port of `lib/cycling/ch_csr.js` with the same data layout: Uint32 offsets,
+//! plus Uint32 to / Float32 cost / Uint32 viaId per direction. Nodes carry
 //! ids/lons/lats/levels/cores as parallel typed arrays.
 //!
 //! Memory profile: pre-sized CSR allocations only. The wasm entry path can

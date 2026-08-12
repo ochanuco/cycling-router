@@ -70,7 +70,11 @@ pub fn snap(csr: &Csr, lon: f64, lat: f64) -> Option<SnapResult> {
         unsafe { *csr.lons.get_unchecked(i) } as f64,
         unsafe { *csr.lats.get_unchecked(i) } as f64,
     );
-    Some(SnapResult { idx: best_idx, id, distance_m: d })
+    Some(SnapResult {
+        idx: best_idx,
+        id,
+        distance_m: d,
+    })
 }
 
 #[cfg(test)]

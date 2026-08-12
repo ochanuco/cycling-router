@@ -146,13 +146,13 @@ fn min_distance2_to_route(px: f64, py: f64, rx: &[f64], ry: &[f64]) -> f64 {
 ///    segment using parameterized closest-point clamped to [0, 1].
 ///  - returns Float32 (sub-mm precision at this scale, halves payload to JS)
 pub fn route_distances(route_lonlats: &[f64], shop_lonlats: &[f64]) -> Vec<f32> {
-    if shop_lonlats.len() < 2 || shop_lonlats.len() % 2 != 0 {
+    if shop_lonlats.len() < 2 || !shop_lonlats.len().is_multiple_of(2) {
         return Vec::new();
     }
     let m = shop_lonlats.len() / 2;
     let mut out: Vec<f32> = vec![f32::INFINITY; m];
 
-    if route_lonlats.len() < 4 || route_lonlats.len() % 2 != 0 {
+    if route_lonlats.len() < 4 || !route_lonlats.len().is_multiple_of(2) {
         return out;
     }
     let n = route_lonlats.len() / 2;
