@@ -93,4 +93,11 @@ jobs:
           "
 
       - name: Verify Workers wrapper is bundled
-        run: test -f dist/bundler/router_wasm_worker.js
+        run: |
+          test -f dist/bundler/router_wasm_worker.js
+          test -f dist/bundler/router_wasm_worker.d.ts
+
+      # 手書き d.ts は Rust 側の構造体変更に追従し損ねやすい。フィールド名の
+      # 集合を突き合わせて、追加・削除・改名をここで捕まえる。
+      - name: Check hand-written d.ts matches Rust structs
+        run: node scripts/check-dts.mjs
