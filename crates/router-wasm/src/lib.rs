@@ -91,7 +91,7 @@ pub fn route_ch(
     let mut csr = csr::build_csr_from_uint8_arrays(&u8_arrays);
     #[cfg(not(target_arch = "wasm32"))]
     let mut csr = csr::build_csr(&buf_vec);
-    let csr_build_ms = (chquery_now_ms() - t_csr0) as u32;
+    let csr_build_ms = chquery_now_ms().saturating_sub(t_csr0) as u32;
     #[cfg(target_arch = "wasm32")]
     drop(u8_arrays);
     #[cfg(not(target_arch = "wasm32"))]
@@ -120,7 +120,7 @@ pub fn route_ch(
         to_snap.idx,
         &chquery::ChQueryOpts::default(),
     );
-    let ch_ms = (chquery_now_ms() - t_ch0) as u32;
+    let ch_ms = chquery_now_ms().saturating_sub(t_ch0) as u32;
     let mut fallback_ms: Option<u32> = None;
     let mut algorithm = "ch-wasm";
     // cap 触れたら plain bidi Dijkstra fallback (level 制約なし)
@@ -137,7 +137,7 @@ pub fn route_ch(
                 no_level_constraint: true,
             },
         );
-        fallback_ms = Some((chquery_now_ms() - t_fb0) as u32);
+        fallback_ms = Some(chquery_now_ms().saturating_sub(t_fb0) as u32);
         algorithm = "csr-wasm-dijkstra";
     }
 
@@ -197,7 +197,7 @@ pub fn route_ch(
         csr_build_ms,
         node_count,
     };
-    serde_wasm_bindgen::to_value(&result).unwrap_or(JsValue::NULL)
+    serde_wasm_bindgen::to_value(&result).unwrap_or_else(|_| serialize_failed())
 }
 
 #[derive(Serialize)]
@@ -241,12 +241,28 @@ struct RouteErrWithMeta<'a> {
     meta: &'a RouteMeta,
 }
 
+/// serde 変換が失敗したときの最後の砦。route_ch は「常にオブジェクトを返す
+/// (失敗時も `{ error: ... }`)」という契約なので、null を返すと呼び出し側の
+/// `result.error` 参照が落ちる。js_sys で直接組み立てればシリアライズを
+/// 経由しないため、この経路自体は失敗しない。
+fn serialize_failed() -> JsValue {
+    let obj = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &obj,
+        &JsValue::from_str("error"),
+        &JsValue::from_str("serialize_failed"),
+    );
+    obj.into()
+}
+
 fn to_err(msg: &str) -> JsValue {
-    serde_wasm_bindgen::to_value(&RouteErr { error: msg }).unwrap_or(JsValue::NULL)
+    serde_wasm_bindgen::to_value(&RouteErr { error: msg })
+        .unwrap_or_else(|_| serialize_failed())
 }
 
 fn to_err_with(msg: &str, meta: &RouteMeta) -> JsValue {
-    serde_wasm_bindgen::to_value(&RouteErrWithMeta { error: msg, meta }).unwrap_or(JsValue::NULL)
+    serde_wasm_bindgen::to_value(&RouteErrWithMeta { error: msg, meta })
+        .unwrap_or_else(|_| serialize_failed())
 }
 
 // route_ch の各フェーズ (CSR 構築 / CH クエリ / fallback) を計測するための時刻取得。

@@ -131,6 +131,14 @@ fn load_edges_ndjson(
         let from = parse_required::<u64>(&line, "\"from\"");
         let to = parse_required::<u64>(&line, "\"to\"");
         let cost = parse_required::<f32>(&line, "\"cost_m\"");
+        // NaN はダイクストラの比較を壊し、負のコストは最短路の前提を崩す。
+        // 他の必須フィールドと同じくその場で落とす。
+        if !cost.is_finite() || cost < 0.0 {
+            panic!(
+                "ch-preprocess: cost_m must be finite and non-negative (value={}) in line: {}",
+                cost, line
+            );
+        }
         // oneway: "oneway":true / false / null. We look for the literal.
         let oneway = line.contains("\"oneway\":true");
         let from_idx = match id_to_idx.get(&from) {
@@ -263,11 +271,15 @@ fn reset_dist(dist: &mut Vec<f32>, touched: &mut Vec<u32>) {
 
 /// Naive degree-based node ordering (low degree first). Future enhancement:
 /// edge-difference with lazy priority queue updates.
+///
+/// 次数だけをキーにすると sort_unstable が同次数ノードの順序を保証せず、同じ
+/// 入力から違う CH が出てしまう。生成したタイルと再生成物が食い違うと原因の
+/// 特定が難しいので、ノード index を第 2 キーにして順序を固定する。
 fn compute_order(graph: &Graph) -> Vec<u32> {
     let mut order: Vec<(u32, u32)> = (0..graph.n as u32)
         .map(|v| (v, (graph.fwd[v as usize].len() + graph.rev[v as usize].len()) as u32))
         .collect();
-    order.sort_unstable_by_key(|x| x.1);
+    order.sort_unstable_by_key(|x| (x.1, x.0));
     order.into_iter().map(|x| x.0).collect()
 }
 
@@ -441,11 +453,21 @@ fn main() -> std::io::Result<()> {
     while let Some(a) = args.next() {
         match a.as_str() {
             "--dir" => dir = args.next().map(PathBuf::from),
+            // パース失敗や範囲外を黙って 0.95 に戻すと、`--contract-fraction 1.5`
+            // のような打ち間違いに気づけないまま数時間の前計算が走る。省略時のみ
+            // 既定値を使い、明示指定が不正なら他の引数エラーと同じく即終了する。
             "--contract-fraction" => {
-                contract_fraction = args.next()
-                    .and_then(|s| s.parse::<f64>().ok())
-                    .filter(|v| *v > 0.0 && *v <= 1.0)
-                    .unwrap_or(0.95);
+                let raw = args.next().unwrap_or_default();
+                match raw.parse::<f64>() {
+                    Ok(v) if v > 0.0 && v <= 1.0 => contract_fraction = v,
+                    _ => {
+                        eprintln!(
+                            "--contract-fraction must be a number in (0, 1]; got {:?}",
+                            raw
+                        );
+                        std::process::exit(1);
+                    }
+                }
             }
             "-h" | "--help" => {
                 println!("Usage: ch-preprocess --dir <graphDir> [--contract-fraction 0.95]");

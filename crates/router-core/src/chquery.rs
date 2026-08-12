@@ -67,20 +67,23 @@ pub struct ChQueryResult {
 
 pub fn ch_query(csr: &Csr, start_idx: u32, goal_idx: u32, opts: &ChQueryOpts) -> ChQueryResult {
     let n = csr.node_count;
-    if start_idx == goal_idx {
-        return ChQueryResult {
-            distance: 0.0,
-            path_idx: vec![start_idx],
-            settled: 0,
-            terminated: "same",
-        };
-    }
+    // 範囲検査を同一判定より先に行う。逆順だと範囲外の同じ index (例: 両方 u32::MAX)
+    // が "same" として距離 0 で成功扱いになり、存在しないノードへの経路が
+    // 引けたように見えてしまう。
     if start_idx >= n || goal_idx >= n {
         return ChQueryResult {
             distance: INF,
             path_idx: vec![],
             settled: 0,
             terminated: "oob",
+        };
+    }
+    if start_idx == goal_idx {
+        return ChQueryResult {
+            distance: 0.0,
+            path_idx: vec![start_idx],
+            settled: 0,
+            terminated: "same",
         };
     }
 
@@ -468,5 +471,32 @@ mod tests {
         assert_eq!(out, vec![i1, i2]);
         // suppress unused warnings for NO_VIA in test scope
         let _ = NO_VIA;
+    }
+
+    #[test]
+    fn out_of_range_same_index_is_oob_not_same() {
+        // 範囲検査が同一判定より後ろにあると、範囲外の同じ index が距離 0 の
+        // "same" として成功扱いになる。存在しないノードへの経路が引けたように
+        // 見えるので、必ず "oob" になること。
+        let tile = make_tile(
+            vec![enc_node(1, 135.0, 34.0, 1, 0), enc_node(2, 135.001, 34.0, 2, 0)],
+            vec![enc_edge(1, 2, 135.001, 34.0, 10.0, u64::MAX)],
+        );
+        let csr = build_csr(&[tile]);
+        let n = csr.node_count;
+
+        let r = ch_query(&csr, n, n, &ChQueryOpts::default());
+        assert_eq!(r.terminated, "oob");
+        assert!(r.distance.is_infinite());
+        assert!(r.path_idx.is_empty());
+
+        let r = ch_query(&csr, u32::MAX, u32::MAX, &ChQueryOpts::default());
+        assert_eq!(r.terminated, "oob");
+
+        // 範囲内の同一 index は従来どおり "same"
+        let r = ch_query(&csr, 0, 0, &ChQueryOpts::default());
+        assert_eq!(r.terminated, "same");
+        assert_eq!(r.distance, 0.0);
+        assert_eq!(r.path_idx, vec![0]);
     }
 }
