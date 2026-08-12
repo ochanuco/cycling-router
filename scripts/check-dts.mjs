@@ -77,16 +77,33 @@ for (const [rustName, tsName] of PAIRS) {
   }
 }
 
-// RouteErr / RouteErrWithMeta は 1-2 フィールドなので存在確認のみ。
-for (const name of ['RouteErr', 'RouteErrWithMeta']) {
-  if (!rust.includes(`struct ${name}`)) {
+// 失敗時の戻り値は Rust 側が RouteErr と RouteErrWithMeta の 2 種類あり、TS 側は
+// meta を optional にした RouteChErr 1 つで両方を表す。したがって RouteChErr の
+// フィールド集合は 2 つの Rust 構造体の和集合と一致するはず。存在確認だけだと
+// 例えば Rust に error_code を足しても気づけないので、ここも突き合わせる。
+try {
+  const rustErrUnion = new Set([
+    ...rustStructFields(rust, 'RouteErr'),
+    ...rustStructFields(rust, 'RouteErrWithMeta')
+  ]);
+  const tsErr = tsInterfaceFields(dts, 'RouteChErr');
+
+  const missingInTs = [...rustErrUnion].filter((f) => !tsErr.has(f));
+  const extraInTs = [...tsErr].filter((f) => !rustErrUnion.has(f));
+
+  if (missingInTs.length || extraInTs.length) {
     failed = true;
-    process.stderr.write(`Rust struct not found: ${name}\n`);
+    process.stderr.write('\nRouteErr + RouteErrWithMeta (Rust) <-> RouteChErr (TS) が一致しません\n');
+    if (missingInTs.length) process.stderr.write(`  d.ts に無い: ${missingInTs.join(', ')}\n`);
+    if (extraInTs.length) process.stderr.write(`  d.ts にだけある: ${extraInTs.join(', ')}\n`);
+  } else {
+    process.stdout.write(
+      `RouteErr + RouteErrWithMeta <-> RouteChErr: ${rustErrUnion.size} フィールド一致\n`
+    );
   }
-}
-if (!dts.includes('interface RouteChErr')) {
+} catch (e) {
   failed = true;
-  process.stderr.write('TS interface not found: RouteChErr\n');
+  process.stderr.write(`${e.message}\n`);
 }
 
 if (failed) {

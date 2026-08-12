@@ -16,8 +16,14 @@ export interface RouteMeta {
   csr_edge_count: number;
   csr_build_ms: number;
   ch_ms: number;
-  /** CH で解けず bidirectional Dijkstra に落ちたときのみ設定される。 */
-  fallback_ms: number | null;
+  /**
+   * CH で解けず bidirectional Dijkstra に落ちたときのみ値が入る。
+   *
+   * Rust 側は `Option<u32>`。`serde_wasm_bindgen::to_value` は既定設定
+   * (`serialize_missing_as_null = false`) なので `None` は `null` ではなく
+   * `undefined` になる。キー自体は常に存在する。
+   */
+  fallback_ms: number | undefined;
 }
 
 /** 経路が引けたときの結果。coords は [lon, lat] の並び。 */
@@ -27,7 +33,8 @@ export interface RouteChOk {
   settled: number;
   terminated: string;
   ch_ms: number;
-  fallback_ms: number | null;
+  /** RouteMeta.fallback_ms と同じく、未設定時は `null` ではなく `undefined`。 */
+  fallback_ms: number | undefined;
   snap_from_m: number;
   snap_to_m: number;
   from_id: number;
