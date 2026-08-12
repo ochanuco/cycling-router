@@ -61,6 +61,12 @@ jobs:
         with:
           tool: wasm-pack
 
+      # route_filter の simd128 実装は wasm32 でしかコンパイルされないので、
+      # 上の "Test (native)" では 1 行も実行されない。スカラー実装との差分
+      # テストを wasm 上で走らせて、索引計算と退化セグメントの扱いを担保する。
+      - name: Test (wasm32 SIMD)
+        run: wasm-pack test --node crates/router-core
+
       # release.yml と同じ経路で成果物を作り、壊れていたら PR 時点で気づけるように
       # する。cargo build だけでは wasm-bindgen glue と Workers wrapper の同梱まで
       # 検証されない。
