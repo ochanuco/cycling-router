@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/router-core", "crates/router-wasm", "crates/router-cli"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ochanuco/cycling-router"
