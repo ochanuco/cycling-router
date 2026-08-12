@@ -172,7 +172,9 @@ pub fn route_ch(
         }
         coords.push((lon, lat));
     }
-    let node_count = expanded.len() as u32;
+    // NaN 座標を落とした後の点数を返す。expanded.len() のままだと coords の
+    // 長さと食い違い、呼び出し側が「返ってきた経路点の数」として使うとずれる。
+    let node_count = coords.len() as u32;
     let csr_node_count = csr.node_count;
     let csr_edge_count = csr.edge_count;
     drop(expanded);
@@ -256,8 +258,7 @@ fn serialize_failed() -> JsValue {
 }
 
 fn to_err(msg: &str) -> JsValue {
-    serde_wasm_bindgen::to_value(&RouteErr { error: msg })
-        .unwrap_or_else(|_| serialize_failed())
+    serde_wasm_bindgen::to_value(&RouteErr { error: msg }).unwrap_or_else(|_| serialize_failed())
 }
 
 fn to_err_with(msg: &str, meta: &RouteMeta) -> JsValue {

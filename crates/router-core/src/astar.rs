@@ -41,10 +41,18 @@ fn haversine_m(lon1: f64, lat1: f64, lon2: f64, lat2: f64) -> f64 {
     (dxm * dxm + dym * dym).sqrt()
 }
 
+/// f64 で渡されたノード参照が index として使えるか検証する。
+/// `raw as u32` は saturating cast のため、負値・NaN・非整数を素通しすると
+/// 実在しない辺がノード 0 に結び付いてしまう。
+#[inline]
+fn valid_node_ref(raw: f64, n: u32) -> bool {
+    raw.is_finite() && raw >= 0.0 && raw.fract() == 0.0 && raw < f64::from(n)
+}
+
 /// Forward A* on the flat graph representation. Returns the path including
 /// start and goal indices, prefixed by the total distance.
 pub fn astar(node_coords: &[f64], edge_data: &[f64], start: u32, goal: u32) -> Vec<f64> {
-    if node_coords.len() < 2 || node_coords.len() % 2 != 0 {
+    if node_coords.len() < 2 || !node_coords.len().is_multiple_of(2) {
         return vec![f64::INFINITY];
     }
     let n = (node_coords.len() / 2) as u32;
@@ -55,14 +63,25 @@ pub fn astar(node_coords: &[f64], edge_data: &[f64], start: u32, goal: u32) -> V
         return vec![0.0, start as f64];
     }
 
-    // Build CSR-style adjacency: head[v] = first edge index for node v
+    // ノードごとの出辺リスト (fan_out[v] = v から出る辺の index 列)。
+    //
+    // 端点は f64 で渡ってくるが、f64 → u32 は saturating cast なので、負値や
+    // NaN をそのまま通すと黙ってノード 0 への辺に化ける。整数性まで含めて
+    // 検証し、不正な辺はここで捨てる。コストも同様に検証しておくと、以降の
+    // 緩和処理は妥当な値だけを見ればよくなる。
     let edge_count = edge_data.len() / 3;
     let mut fan_out: Vec<Vec<usize>> = vec![Vec::new(); n as usize];
     for ei in 0..edge_count {
-        let from = edge_data[ei * 3] as u32;
-        if from < n {
-            fan_out[from as usize].push(ei);
+        let raw_from = edge_data[ei * 3];
+        let raw_to = edge_data[ei * 3 + 1];
+        let cost = edge_data[ei * 3 + 2];
+        if !valid_node_ref(raw_from, n) || !valid_node_ref(raw_to, n) {
+            continue;
         }
+        if !cost.is_finite() || cost < 0.0 {
+            continue;
+        }
+        fan_out[raw_from as usize].push(ei);
     }
 
     let goal_lon = node_coords[(goal as usize) * 2];

@@ -479,7 +479,10 @@ mod tests {
         // "same" として成功扱いになる。存在しないノードへの経路が引けたように
         // 見えるので、必ず "oob" になること。
         let tile = make_tile(
-            vec![enc_node(1, 135.0, 34.0, 1, 0), enc_node(2, 135.001, 34.0, 2, 0)],
+            vec![
+                enc_node(1, 135.0, 34.0, 1, 0),
+                enc_node(2, 135.001, 34.0, 2, 0),
+            ],
             vec![enc_edge(1, 2, 135.001, 34.0, 10.0, u64::MAX)],
         );
         let csr = build_csr(&[tile]);
