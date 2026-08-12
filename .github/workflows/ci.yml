@@ -38,6 +38,13 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # 上の Clippy はホストターゲットなので、`#[cfg(target_arch = "wasm32")]`
+      # で囲われたコード (route_ch の Uint8Array 経路など) を一切見ていない。
+      # 下の "Build wasm target" は通るが -D warnings が無く lint も走らない。
+      # router-cli はホスト専用なので対象から外す。
+      - name: Clippy (wasm32)
+        run: cargo clippy -p router-core -p router-wasm --all-targets --target wasm32-unknown-unknown -- -D warnings
+
       - name: Test (native)
         run: cargo test --workspace
 

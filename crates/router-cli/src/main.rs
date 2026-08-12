@@ -61,9 +61,14 @@ fn load_nodes_ndjson(
         let id = parse_required::<u64>(&line, "\"id\"");
         // 座標は CH 前計算では使わない (次数だけで順序を決める) が、欠損・不正な
         // 行をここで弾くために検証は通す。座標のないノードはタイル生成側で問題に
-        // なるので、前処理を通してしまわない。
-        let _ = parse_required::<f64>(&line, "\"lon\"");
-        let _ = parse_required::<f64>(&line, "\"lat\"");
+        // なるので、前処理を通してしまわない。parse_required は構文しか見ないため
+        // "NaN" は素通りする。NaN 座標のノードは route_ch 側で経路点から除外され、
+        // distance と返却座標列が食い違う原因になるので、ここで弾く。
+        let lon = parse_required::<f64>(&line, "\"lon\"");
+        let lat = parse_required::<f64>(&line, "\"lat\"");
+        if !lon.is_finite() || !lat.is_finite() {
+            panic!("ch-preprocess: lon/lat must be finite: {line}");
+        }
         if id_to_idx.contains_key(&id) {
             continue;
         }
