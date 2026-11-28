@@ -1,0 +1,4 @@
+[tools]
+rust = { version = "1.99.1", targets = "wasm32-unknown-unknown" }
+"cargo:wasm-pack" = "0.15.0"
+node = "24"
